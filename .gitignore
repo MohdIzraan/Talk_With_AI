@@ -1,0 +1,11 @@
+ # Dependencies - these get reinstalled via npm install
+node_modules/
+
+# Environment files - contains secret key
+.env
+
+# Build output
+dist/
+
+# Logs
+*.log
