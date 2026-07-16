@@ -1,56 +1,61 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { FiSend } from "react-icons/fi";
-import { FiCornerDownLeft } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
+import { FiSend, FiUserX, FiLogIn } from "react-icons/fi";
 import Sidebar from "../components/Sidebar";
 import Navbar from "../components/Navbar";
 import MessageBubble from "../components/MessageBubble";
 import TypingIndicator from "../components/TypingIndicator";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { useAuth } from "../hooks/useAuth";
 import {
   getChats,
   getChatById,
   createChat,
   deleteChat as deleteChatRequest,
   sendMessage,
+  sendGuestMessage,
 } from "../services/chatService";
 
 const Chat = () => {
-  const [chats, setChats] = useState([]);
+  const { isGuest, logout } = useAuth();
+  const navigate = useNavigate();
+
+  // ── Authenticated state ──
+  const [chats, setChats]               = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [loadingChats, setLoadingChats] = useState(true);
+  const [loadingChats, setLoadingChats] = useState(!isGuest);
+
+  // ── Shared state ──
+  const [messages, setMessages]         = useState([]);
+  const [input, setInput]               = useState("");
+  const [sending, setSending]           = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [error, setError] = useState("");
+  const [sidebarOpen, setSidebarOpen]   = useState(false);
+  const [error, setError]               = useState("");
 
   const messagesEndRef = useRef(null);
-  const textareaRef = useRef(null); // ref for the chat input textarea
+  const textareaRef    = useRef(null);
 
-  // Scroll to the latest message whenever messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
 
-  // Auto-resize the textarea height as the user types more lines
   useEffect(() => {
     const ta = textareaRef.current;
     if (ta) {
-      ta.style.height = "auto";           // reset first so it can shrink
-      ta.style.height = ta.scrollHeight + "px"; // grow to fit content
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
     }
   }, [input]);
 
-  // Load the chat list on mount
+  // Load chat list only for authenticated users
   useEffect(() => {
+    if (isGuest) return;
     const loadChats = async () => {
       try {
         const data = await getChats();
         setChats(data);
-        if (data.length > 0) {
-          selectChat(data[0]._id);
-        }
+        if (data.length > 0) selectChat(data[0]._id);
       } catch (err) {
         setError("Failed to load chat history.");
       } finally {
@@ -58,7 +63,8 @@ const Chat = () => {
       }
     };
     loadChats();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isGuest]);
 
   const selectChat = useCallback(async (chatId) => {
     setActiveChatId(chatId);
@@ -91,22 +97,17 @@ const Chat = () => {
     try {
       await deleteChatRequest(chatId);
       setChats((prev) => prev.filter((c) => c._id !== chatId));
-      if (activeChatId === chatId) {
-        setActiveChatId(null);
-        setMessages([]);
-      }
+      if (activeChatId === chatId) { setActiveChatId(null); setMessages([]); }
     } catch (err) {
       setError("Failed to delete chat.");
     }
   };
 
-  // Called when Enter is pressed without Shift — submits the form
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault(); // stop the default newline from being added
+      e.preventDefault();
       handleSend(e);
     }
-    // Shift+Enter: allow newline.
   };
 
   const handleSend = async (e) => {
@@ -114,14 +115,34 @@ const Chat = () => {
     const content = input.trim();
     if (!content || sending) return;
 
-    // Reset textarea height back to single line after sending
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+
+    // ── GUEST MODE ── store in state only, call public endpoint
+    if (isGuest) {
+      const userMsg = { role: "user", content, timestamp: new Date().toISOString() };
+      const updatedMessages = [...messages, userMsg];
+      setMessages(updatedMessages);
+      setInput("");
+      setSending(true);
+      setError("");
+      try {
+        const replyText = await sendGuestMessage(
+          updatedMessages.map((m) => ({ role: m.role, content: m.content }))
+        );
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: replyText, timestamp: new Date().toISOString() },
+        ]);
+      } catch (err) {
+        setError("The AI failed to respond. Please try again.");
+      } finally {
+        setSending(false);
+      }
+      return;
     }
 
+    // ── AUTHENTICATED MODE ── create chat if needed, save to DB
     let chatId = activeChatId;
-
-    // If there's no active chat yet, create one first
     if (!chatId) {
       try {
         const chat = await createChat("New Chat");
@@ -134,7 +155,6 @@ const Chat = () => {
       }
     }
 
-    // Optimistically add the user's message to the UI
     const optimisticUserMsg = { role: "user", content, timestamp: new Date().toISOString() };
     setMessages((prev) => [...prev, optimisticUserMsg]);
     setInput("");
@@ -144,8 +164,6 @@ const Chat = () => {
     try {
       const updatedChat = await sendMessage(chatId, content);
       setMessages(updatedChat.messages);
-
-      // Update the sidebar title/order in case it was auto-generated
       setChats((prev) => {
         const others = prev.filter((c) => c._id !== chatId);
         return [{ _id: chatId, title: updatedChat.title, updatedAt: new Date() }, ...others];
@@ -157,20 +175,55 @@ const Chat = () => {
     }
   };
 
+  const handleGuestLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 dark:bg-gray-900">
-      <Sidebar
-        chats={chats}
-        activeChatId={activeChatId}
-        onSelectChat={selectChat}
-        onNewChat={handleNewChat}
-        onDeleteChat={handleDeleteChat}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
+
+      {/* Sidebar — only shown for authenticated users */}
+      {!isGuest && (
+        <Sidebar
+          chats={chats}
+          activeChatId={activeChatId}
+          onSelectChat={selectChat}
+          onNewChat={handleNewChat}
+          onDeleteChat={handleDeleteChat}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+      )}
 
       <div className="flex flex-1 flex-col">
         <Navbar onMenuClick={() => setSidebarOpen(true)} />
+
+        {/* Guest mode banner */}
+        {isGuest && (
+          <div className="flex items-center justify-between bg-amber-50 px-4 py-2 dark:bg-amber-900/30">
+            <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
+              <FiUserX size={15} />
+              <span>
+                You're in <strong>Guest Mode</strong> — your chat won't be saved.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate("/register")}
+                className="flex items-center gap-1 rounded-lg bg-primary-600 px-3 py-1 text-xs font-semibold text-white hover:bg-primary-700"
+              >
+                <FiLogIn size={13} /> Sign Up to Save
+              </button>
+              <button
+                onClick={handleGuestLogout}
+                className="rounded-lg px-3 py-1 text-xs text-amber-600 hover:underline dark:text-amber-400"
+              >
+                Exit
+              </button>
+            </div>
+          </div>
+        )}
 
         <main className="chat-scroll flex-1 overflow-y-auto px-4 py-6">
           {loadingChats ? (
@@ -181,8 +234,14 @@ const Chat = () => {
             </div>
           ) : messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center text-center text-gray-400">
-              <p className="text-lg font-medium">Start a conversation</p>
-              <p className="text-sm">Type a message below to chat with the AI assistant.</p>
+              <p className="text-lg font-medium">
+                {isGuest ? "You're chatting as a Guest" : "Start a conversation"}
+              </p>
+              <p className="text-sm">
+                {isGuest
+                  ? "Ask me anything — no account needed. Sign up to save your history."
+                  : "Type a message below to chat with the AI assistant."}
+              </p>
             </div>
           ) : (
             <div className="mx-auto flex max-w-3xl flex-col gap-4">
@@ -211,7 +270,6 @@ const Chat = () => {
           className="border-t border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
         >
           <div className="mx-auto flex max-w-3xl items-end gap-2">
-            {/* Textarea grows up to 6 lines, then scrolls */}
             <textarea
               ref={textareaRef}
               rows={1}
@@ -229,14 +287,10 @@ const Chat = () => {
                 disabled={sending || !input.trim()}
                 className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
                 aria-label="Send message"
-                title="Send (Enter)"
               >
                 <FiSend size={16} />
               </button>
-              {/* Small hint label below the send button */}
-              <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                ⇧↵ new line
-              </span>
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">⇧↵ new line</span>
             </div>
           </div>
         </form>

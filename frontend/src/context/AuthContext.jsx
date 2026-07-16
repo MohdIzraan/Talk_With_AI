@@ -8,32 +8,33 @@ import {
 export const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true); // true while checking existing session
+  const [user, setUser]       = useState(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  // On first mount, if a token already exists in localStorage, try to restore the session by fetching the user's profile.
   useEffect(() => {
     const restoreSession = async () => {
-      const token = localStorage.getItem("token");
+      const token      = localStorage.getItem("token");
       const storedUser = localStorage.getItem("user");
+      const guestMode  = localStorage.getItem("guestMode");
 
       if (token && storedUser) {
         try {
           setUser(JSON.parse(storedUser));
-          // Verify token is still valid in the background
           const freshUser = await fetchProfile();
           setUser(freshUser);
           localStorage.setItem("user", JSON.stringify(freshUser));
         } catch (err) {
-          // Token invalid/expired - clear stale session
           localStorage.removeItem("token");
           localStorage.removeItem("user");
           setUser(null);
         }
+      } else if (guestMode === "true") {
+        // Restore guest session across page refreshes
+        setIsGuest(true);
       }
       setLoading(false);
     };
-
     restoreSession();
   }, []);
 
@@ -41,6 +42,9 @@ export const AuthProvider = ({ children }) => {
     const data = await loginRequest(email, password);
     localStorage.setItem("token", data.token);
     localStorage.setItem("user", JSON.stringify(data.user));
+    // Clear any leftover guest flag when a real user logs in
+    localStorage.removeItem("guestMode");
+    setIsGuest(false);
     setUser(data.user);
     return data.user;
   };
@@ -49,14 +53,23 @@ export const AuthProvider = ({ children }) => {
     const data = await registerRequest(name, email, password);
     localStorage.setItem("token", data.token);
     localStorage.setItem("user", JSON.stringify(data.user));
+    localStorage.removeItem("guestMode");
+    setIsGuest(false);
     setUser(data.user);
     return data.user;
+  };
+
+  const loginAsGuest = () => {
+    localStorage.setItem("guestMode", "true");
+    setIsGuest(true);
   };
 
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("guestMode");
     setUser(null);
+    setIsGuest(false);
   };
 
   const updateUser = (updatedUser) => {
@@ -66,7 +79,17 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, register, logout, updateUser, isAuthenticated: !!user }}
+      value={{
+        user,
+        loading,
+        isGuest,
+        login,
+        register,
+        loginAsGuest,
+        logout,
+        updateUser,
+        isAuthenticated: !!user,
+      }}
     >
       {children}
     </AuthContext.Provider>

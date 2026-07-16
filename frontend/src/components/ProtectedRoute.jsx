@@ -4,13 +4,13 @@ import LoadingSpinner from "./LoadingSpinner";
 
 // Wraps private pages. While the session restore check is running, shows a spinner; otherwise redirects to /login if there is no authenticated user.
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, isGuest, loading } = useAuth();
 
   if (loading) {
     return <LoadingSpinner fullScreen />;
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated && !isGuest) {
     return <Navigate to="/login" replace />;
   }
 

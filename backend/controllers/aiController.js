@@ -46,3 +46,18 @@ export const sendMessage = async (req, res, next) => {
     next(error);
   }
 };
+
+// PUBLIC — no JWT required. Nothing saved to DB. Guest mode only.
+export const guestMessage = async (req, res, next) => {
+  try {
+    const { messages } = req.body;
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ success: false, message: "Messages array is required" });
+    }
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    const aiReplyText = await getAIReply(history);
+    res.status(200).json({ success: true, reply: aiReplyText });
+  } catch (error) {
+    next(error);
+  }
+};

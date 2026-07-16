@@ -35,3 +35,8 @@ export const sendMessage = async (chatId, content) => {
   const { data } = await api.post("/ai/message", { chatId, content });
   return data.chat;
 };
+
+export const sendGuestMessage = async (messages) => {
+  const { data } = await api.post("/ai/guest-message", { messages });
+  return data.reply;
+};
